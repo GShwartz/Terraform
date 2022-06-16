@@ -107,20 +107,22 @@ data "azurerm_public_ip" "load_balancer_pip_data" {
 }
 
 resource "azurerm_network_interface" "nic01" {
-  name                = "example-nic"
+  count = 3
+  name                = "WebAppVMnic-${count.index}"
   location            = azurerm_resource_group.weight_tracker_rg.location
   resource_group_name = azurerm_resource_group.weight_tracker_rg.name
 
   ip_configuration {
-    name                          = "internal"
+    name                          = "WebAppVMnic-${count.index}"
     subnet_id                     = azurerm_subnet.app_subnet.id
     private_ip_address_allocation = "Dynamic"
   }
 }
 
 resource "azurerm_network_interface_backend_address_pool_association" "nics_association" {
+  count = 3
   backend_address_pool_id = azurerm_lb_backend_address_pool.backend_pool.id
-  ip_configuration_name   = "internal"
-  network_interface_id    = azurerm_network_interface.nic01.id
+  ip_configuration_name   = "WebAppVMnic-${count.index}"
+  network_interface_id    = azurerm_network_interface.nic01[count.index].id
 
 }
