@@ -19,17 +19,8 @@ resource "azurerm_virtual_network" "tf_rg_vnet" {
 
 # Configure Subnet for Applications VMS
 resource "azurerm_subnet" "application_subnet" {
-  name                 = var.subnet_name
+  name                 = var.applications_subnet_name
   address_prefixes     = [var.frontend_address_prefix]
-  resource_group_name  = azurerm_resource_group.weight_tracker_rg.name
-  virtual_network_name = azurerm_virtual_network.tf_rg_vnet.name
-
-}
-
-# Configure Subnet for PostgreSQL
-resource "azurerm_subnet" "database_subnet" {
-  name                 = "Databases"
-  address_prefixes     = ["10.200.20.0/24"]
   resource_group_name  = azurerm_resource_group.weight_tracker_rg.name
   virtual_network_name = azurerm_virtual_network.tf_rg_vnet.name
 
@@ -82,37 +73,10 @@ resource "azurerm_network_security_group" "applications_nsg" {
 
 }
 
-# Configure NSG for Databases subnet
-resource "azurerm_network_security_group" "databases_nsg" {
-  name                = "Databases_NSG"
-  location            = var.location
-  resource_group_name = azurerm_resource_group.weight_tracker_rg.name
-
-  # Allow postgreSQL port
-  security_rule {
-    name                       = "PostgreSQL"
-    priority                   = 1001
-    direction                  = "Inbound"
-    access                     = "Allow"
-    protocol                   = "Tcp"
-    source_port_range          = "*"
-    destination_port_range     = "5432"
-    source_address_prefix      = "*"
-    destination_address_prefix = "10.200.20.0/24"
-  }
-}
-
 # Connect Application Subnet to NSG
 resource "azurerm_subnet_network_security_group_association" "application_subnet_nsg" {
   network_security_group_id = azurerm_network_security_group.applications_nsg.id
   subnet_id                 = azurerm_subnet.application_subnet.id
-
-}
-
-# Connect Databases Subnet to NSG
-resource "azurerm_subnet_network_security_group_association" "databases_subnet_nsg" {
-  network_security_group_id = azurerm_network_security_group.databases_nsg.id
-  subnet_id                 = azurerm_subnet.database_subnet.id
 
 }
 
@@ -202,12 +166,13 @@ resource "azurerm_public_ip" "pips" {
   count               = length(var.nics)
   allocation_method   = "Static"
   location            = var.location
-  name                = "${var.machine_name}${count.index}-PiP"
+  name                = "${var.machine_name}${count.index + 1}-PiP"
   resource_group_name = azurerm_resource_group.weight_tracker_rg.name
   sku                 = "Standard"
 
 }
 
+# Create Network Interface
 resource "azurerm_network_interface" "nic_webapp" {
   count               = length(var.nics)
   location            = var.location
@@ -219,24 +184,26 @@ resource "azurerm_network_interface" "nic_webapp" {
     subnet_id                     = azurerm_subnet.application_subnet.id
     private_ip_address_allocation = "Static"
     private_ip_address            = element(var.nics, count.index)
-    #    public_ip_address_id          = azurerm_public_ip.pips[count.index].id
-    #    public_ip_address_id          = data.azurerm_public_ip.pip.id
+    public_ip_address_id          = azurerm_public_ip.pips[count.index].id
 
   }
 }
 
+# Fetch Current Network Interfaces
 data "azurerm_network_interface" "nics" {
-  count               = 3
+  count               = length(var.nics)
   name                = azurerm_network_interface.nic_webapp[count.index].name
   resource_group_name = azurerm_resource_group.weight_tracker_rg.name
 }
 
+# Link Network Interface to Security Group
 resource "azurerm_network_interface_security_group_association" "app_nsg" {
   count                     = length(var.nics)
   network_interface_id      = azurerm_network_interface.nic_webapp[count.index].id
   network_security_group_id = azurerm_network_security_group.applications_nsg.id
 }
 
+# Create Virtual Machines
 resource "azurerm_virtual_machine" "weight_tracker" {
   count                 = 3
   location              = var.location
