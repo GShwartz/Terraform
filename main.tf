@@ -59,12 +59,14 @@ resource "azurerm_network_security_group" "apps_nsg" {
   }
 }
 
+# Link Subnet to NSG
 resource "azurerm_subnet_network_security_group_association" "apps_nsg_link" {
   network_security_group_id = azurerm_network_security_group.apps_nsg.id
   subnet_id                 = azurerm_subnet.app_subnet.id
 
 }
 
+# Create Public IP
 resource "azurerm_public_ip" "load_balancer_pip" {
   allocation_method   = "Static"
   location            = var.location
@@ -74,9 +76,7 @@ resource "azurerm_public_ip" "load_balancer_pip" {
 
 }
 
-# ==================================================================== #
-# Load Balancer #
-# ==================================================================== #
+# Create Load Balancer
 resource "azurerm_lb" "load_balancer" {
   location            = var.location
   name                = "Load_Balancer"
@@ -91,22 +91,44 @@ resource "azurerm_lb" "load_balancer" {
 
 }
 
-# ===================================== #
 # Load Balancer Address Pool & Addresses
-# ===================================== #
 resource "azurerm_lb_backend_address_pool" "backend_pool" {
   loadbalancer_id = azurerm_lb.load_balancer.id
   name            = "BackEndAddressPool"
 }
 
-# ==================================================================== #
+# Create Load Balancer NAT Pool
+resource "azurerm_lb_nat_pool" "natpool" {
+  backend_port                   = 2
+  frontend_ip_configuration_name = "PublicIPAddress"
+  frontend_port_end              = 25
+  frontend_port_start            = 22
+  loadbalancer_id                = azurerm_lb.load_balancer.id
+  name                           = "SSH"
+  protocol                       = "Tcp"
+  resource_group_name            = azurerm_resource_group.weight_tracker_rg.name
 
+}
+
+# Create Load Balancer NAT Rule
+resource "azurerm_lb_nat_rule" "nat_rule_ssh" {
+  name                = "SSH"
+  resource_group_name = azurerm_resource_group.weight_tracker_rg.name
+  backend_port        = 22
+  frontend_ip_configuration_name = "PublicIPAddress"
+  frontend_port = 22
+  loadbalancer_id = azurerm_lb.load_balancer.id
+  protocol = "Tcp"
+}
+
+# Configure Public IP Address
 data "azurerm_public_ip" "load_balancer_pip_data" {
   name                = azurerm_public_ip.load_balancer_pip.name
   resource_group_name = azurerm_resource_group.weight_tracker_rg.name
 }
 
-resource "azurerm_network_interface" "nic01" {
+# Create 3 Network Interfaces
+resource "azurerm_network_interface" "nics" {
   count = 3
   name                = "WebAppVMnic-${count.index}"
   location            = azurerm_resource_group.weight_tracker_rg.location
@@ -119,10 +141,11 @@ resource "azurerm_network_interface" "nic01" {
   }
 }
 
+# Link Network Interfaces to Load Balancer Address Pool
 resource "azurerm_network_interface_backend_address_pool_association" "nics_association" {
   count = 3
   backend_address_pool_id = azurerm_lb_backend_address_pool.backend_pool.id
   ip_configuration_name   = "WebAppVMnic-${count.index}"
-  network_interface_id    = azurerm_network_interface.nic01[count.index].id
+  network_interface_id    = azurerm_network_interface.nics[count.index].id
 
 }
