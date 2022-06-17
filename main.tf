@@ -9,24 +9,7 @@ resource "azurerm_resource_group" "weight_tracker_rg" {
 
 }
 
-# Create Virtual Network
-resource "azurerm_virtual_network" "vnet" {
-  address_space       = ["10.200.0.0/16"]
-  location            = var.location
-  name                = "Weight_Tracker_Vnet"
-  resource_group_name = azurerm_resource_group.weight_tracker_rg.name
-
-}
-
-resource "azurerm_subnet" "app_subnet" {
-  address_prefixes     = ["10.200.10.0/24"]
-  name                 = "App-Servers"
-  resource_group_name  = azurerm_resource_group.weight_tracker_rg.name
-  virtual_network_name = azurerm_virtual_network.vnet.name
-
-  depends_on = [azurerm_resource_group.weight_tracker_rg]
-}
-
+# Create NSG for App-Servers & DB
 resource "azurerm_network_security_group" "apps_nsg" {
   location            = var.location
   name                = "App-Servers-NSG"
@@ -42,7 +25,7 @@ resource "azurerm_network_security_group" "apps_nsg" {
     source_port_range          = "*"
     destination_port_range     = "22"
     source_address_prefix      = "*"
-    destination_address_prefix = "10.200.10.0/24"
+    destination_address_prefix = "10.0.0.0/24"
   }
 
   # Allow HTTP on port 8080
@@ -55,105 +38,14 @@ resource "azurerm_network_security_group" "apps_nsg" {
     source_port_range          = "*"
     destination_port_range     = "8080"
     source_address_prefix      = "*"
-    destination_address_prefix = "10.200.10.0/24"
+    destination_address_prefix = "10.0.0.0/24"
   }
 }
 
-## Link Subnet to NSG
-#resource "azurerm_subnet_network_security_group_association" "apps_nsg_link" {
-#  network_security_group_id = azurerm_network_security_group.apps_nsg.id
-#  subnet_id                 = azurerm_subnet.app_subnet.id
-#
-#}
-
-# Create Public IP
-resource "azurerm_public_ip" "load_balancer_pip" {
-  allocation_method   = "Static"
-  location            = var.location
-  name                = "Load_Balancer_PiP"
-  resource_group_name = azurerm_resource_group.weight_tracker_rg.name
-  sku                 = "Standard"
-
-}
-
-# Create Load Balancer
-resource "azurerm_lb" "load_balancer" {
-  location            = var.location
-  name                = "Load_Balancer"
-  resource_group_name = azurerm_resource_group.weight_tracker_rg.name
-
-  frontend_ip_configuration {
-    name                 = "PublicIPAddress"
-    public_ip_address_id = azurerm_public_ip.load_balancer_pip.id
-  }
-
-  sku = "Standard"
-
-}
-
-# Load Balancer Address Pool & Addresses
-resource "azurerm_lb_backend_address_pool" "backend_pool" {
-  loadbalancer_id = azurerm_lb.load_balancer.id
-  name            = "BackEndAddressPool"
-
-  depends_on = [azurerm_lb.load_balancer]
-
-}
-
-resource "azurerm_lb_probe" "web_probe" {
-  loadbalancer_id = azurerm_lb.load_balancer.id
-  name            = "HTTP_Probe"
-  port            = 8080
-
-  depends_on = [azurerm_lb.load_balancer]
-
-}
-
-resource "azurerm_lb_probe" "ssh_probe" {
-  loadbalancer_id = azurerm_lb.load_balancer.id
-  name            = "SSH_Probe"
-  port            = 22
-
-  depends_on = [azurerm_lb.load_balancer]
-
-}
-
-resource "azurerm_lb_rule" "web" {
-  backend_port                   = 8080
-  frontend_ip_configuration_name = "PublicIPAddress"
-  frontend_port                  = 8080
-  loadbalancer_id                = azurerm_lb.load_balancer.id
-  name                           = "Web"
-  protocol                       = "Tcp"
-  probe_id                       = azurerm_lb_probe.web_probe.id
-  disable_outbound_snat          = true
-  depends_on                     = [azurerm_lb.load_balancer]
-
-}
-
-# Create Load Balancer NAT Rule
-resource "azurerm_lb_nat_rule" "nat_rule_ssh" {
-  name                           = "SSH"
-  resource_group_name            = azurerm_resource_group.weight_tracker_rg.name
-  backend_port                   = 22
-  frontend_ip_configuration_name = "PublicIPAddress"
-  frontend_port                  = 22
-  loadbalancer_id                = azurerm_lb.load_balancer.id
-  protocol                       = "Tcp"
-
-  depends_on = [azurerm_lb.load_balancer]
-}
-
-resource "azurerm_lb_outbound_rule" "outbound" {
-  backend_address_pool_id = azurerm_lb_backend_address_pool.backend_pool.id
-  loadbalancer_id         = azurerm_lb.load_balancer.id
-  name                    = "Any"
-  protocol                = "All"
-
-  frontend_ip_configuration {
-    name = "PublicIPAddress"
-  }
-
+# Link App-Servers subnet to NSG
+resource "azurerm_subnet_network_security_group_association" "subnet_nsg" {
+  network_security_group_id = azurerm_network_security_group.apps_nsg.id
+  subnet_id                 = azurerm_subnet.app_subnet.id
 }
 
 # Create 3 Network Interfaces
@@ -170,6 +62,22 @@ resource "azurerm_network_interface" "nics" {
   }
 }
 
+# Create Network Interface for Terminal VM
+resource "azurerm_network_interface" "terminal-nic" {
+  location            = var.location
+  name                = "Terminal-VM"
+  resource_group_name = azurerm_resource_group.weight_tracker_rg.name
+
+  ip_configuration {
+    name                          = "Terminal"
+    private_ip_address_allocation = "Dynamic"
+    public_ip_address_id          = azurerm_public_ip.terminal.id
+    subnet_id                     = azurerm_subnet.app_subnet.id
+
+  }
+
+}
+
 # Link Network Interfaces to Load Balancer Address Pool
 resource "azurerm_network_interface_backend_address_pool_association" "nics_association" {
   count                   = 3
@@ -179,9 +87,17 @@ resource "azurerm_network_interface_backend_address_pool_association" "nics_asso
 
 }
 
+# Link Network Interfaces to NSG
 resource "azurerm_network_interface_security_group_association" "nics_nsg" {
   count                     = 3
   network_interface_id      = azurerm_network_interface.nics[count.index].id
+  network_security_group_id = azurerm_network_security_group.apps_nsg.id
+
+}
+
+# Link Terminal NIC to NSG
+resource "azurerm_network_interface_security_group_association" "terminalsec" {
+  network_interface_id      = azurerm_network_interface.terminal-nic.id
   network_security_group_id = azurerm_network_security_group.apps_nsg.id
 
 }
@@ -220,42 +136,13 @@ resource "azurerm_virtual_machine" "weight_tracker" {
   }
 }
 
-# Create connection machine nic
-resource "azurerm_public_ip" "terminal" {
-  allocation_method   = "Dynamic"
-  location            = var.location
-  name                = "Terminal-PiP"
-  resource_group_name = azurerm_resource_group.weight_tracker_rg.name
-
-}
-
-resource "azurerm_network_interface" "terminal-nic" {
-  location            = var.location
-  name                = "Terminal-VM"
-  resource_group_name = azurerm_resource_group.weight_tracker_rg.name
-
-  ip_configuration {
-    name                          = "Terminal"
-    private_ip_address_allocation = "Dynamic"
-    public_ip_address_id          = azurerm_public_ip.terminal.id
-    subnet_id                     = azurerm_subnet.app_subnet.id
-
-  }
-
-}
-
-resource "azurerm_network_interface_security_group_association" "terminalsec" {
-  network_interface_id      = azurerm_network_interface.terminal-nic.id
-  network_security_group_id = azurerm_network_security_group.apps_nsg.id
-
-}
-
+# Create Terminal VM
 resource "azurerm_linux_virtual_machine" "terminal" {
   computer_name                   = "terminal"
   admin_username                  = var.admin_user
   admin_password                  = var.admin_password
   location                        = var.location
-  name                            = "terminal"
+  name                            = "Terminal-Main"
   network_interface_ids           = [azurerm_network_interface.terminal-nic.id]
   resource_group_name             = azurerm_resource_group.weight_tracker_rg.name
   size                            = var.vm_type
