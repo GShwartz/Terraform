@@ -76,3 +76,6 @@ No modules.
 | Name | Description |
 |------|-------------|
 | <a name="output_admin_password"></a> [admin\_password](#output\_admin\_password) | n/a |
+
+# Estimated Costs
+<img src="https://i.postimg.cc/Kct0QxXV/infracost.jpg"> <br />
