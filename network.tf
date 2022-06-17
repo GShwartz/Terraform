@@ -35,3 +35,16 @@ resource "azurerm_public_ip" "terminal" {
   resource_group_name = azurerm_resource_group.weight_tracker_rg.name
 
 }
+
+# Create private DNS Zone
+resource "azurerm_private_dns_zone" "dns_zone" {
+  name                = "weight.sela"
+  resource_group_name = azurerm_resource_group.weight_tracker_rg.name
+}
+
+resource "azurerm_private_dns_zone_virtual_network_link" "zone_link" {
+  name                  = "WeightTracker"
+  private_dns_zone_name = azurerm_private_dns_zone.dns_zone.name
+  resource_group_name   = azurerm_resource_group.weight_tracker_rg.name
+  virtual_network_id    = azurerm_virtual_network.vnet.id
+}
