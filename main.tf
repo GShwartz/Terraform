@@ -9,10 +9,10 @@ resource "azurerm_resource_group" "weight_tracker_rg" {
 
 }
 
-# Create NSG for App-Servers & DB
-resource "azurerm_network_security_group" "apps_nsg" {
+# Create NSG for Terminal
+resource "azurerm_network_security_group" "terminal_nsg" {
   location            = var.location
-  name                = "App-Servers-NSG"
+  name                = "Terminal-NSG"
   resource_group_name = azurerm_resource_group.weight_tracker_rg.name
 
   # Allow SSH Access
@@ -24,9 +24,30 @@ resource "azurerm_network_security_group" "apps_nsg" {
     protocol                   = "Tcp"
     source_port_range          = "*"
     destination_port_range     = "22"
-    source_address_prefix      = "*"
+    source_address_prefix      = "5.29.19.150"
     destination_address_prefix = "10.0.0.0/24"
   }
+
+}
+
+# Create NSG for App-Servers & DB
+resource "azurerm_network_security_group" "apps_nsg" {
+  location            = var.location
+  name                = "App-Servers-NSG"
+  resource_group_name = azurerm_resource_group.weight_tracker_rg.name
+
+  # Allow SSH Access
+#  security_rule {
+#    name                       = "SSH"
+#    priority                   = 1001
+#    direction                  = "Inbound"
+#    access                     = "Allow"
+#    protocol                   = "Tcp"
+#    source_port_range          = "*"
+#    destination_port_range     = "22"
+#    source_address_prefix      = "10.0.0.0/24"
+#    destination_address_prefix = "10.0.0.0/24"
+#  }
 
   # Allow HTTP on port 8080
   security_rule {
@@ -40,12 +61,28 @@ resource "azurerm_network_security_group" "apps_nsg" {
     source_address_prefix      = "*"
     destination_address_prefix = "10.0.0.0/24"
   }
+
 }
 
-# Link App-Servers subnet to NSG
-resource "azurerm_subnet_network_security_group_association" "subnet_nsg" {
+## Link App-Servers subnet to NSG
+#resource "azurerm_subnet_network_security_group_association" "subnet_nsg" {
+#  network_security_group_id = azurerm_network_security_group.apps_nsg.id
+#  subnet_id                 = azurerm_subnet.app_subnet.id
+#}
+
+# Link Network Interfaces to NSG
+resource "azurerm_network_interface_security_group_association" "nics_nsg" {
+  count                     = 3
+  network_interface_id      = azurerm_network_interface.nics[count.index].id
   network_security_group_id = azurerm_network_security_group.apps_nsg.id
-  subnet_id                 = azurerm_subnet.app_subnet.id
+
+}
+
+# Link Terminal NIC to NSG
+resource "azurerm_network_interface_security_group_association" "terminalsec" {
+  network_interface_id      = azurerm_network_interface.terminal-nic.id
+  network_security_group_id = azurerm_network_security_group.terminal_nsg.id
+
 }
 
 # Create 3 Network Interfaces
@@ -87,20 +124,7 @@ resource "azurerm_network_interface_backend_address_pool_association" "nics_asso
 
 }
 
-# Link Network Interfaces to NSG
-resource "azurerm_network_interface_security_group_association" "nics_nsg" {
-  count                     = 3
-  network_interface_id      = azurerm_network_interface.nics[count.index].id
-  network_security_group_id = azurerm_network_security_group.apps_nsg.id
 
-}
-
-# Link Terminal NIC to NSG
-resource "azurerm_network_interface_security_group_association" "terminalsec" {
-  network_interface_id      = azurerm_network_interface.terminal-nic.id
-  network_security_group_id = azurerm_network_security_group.apps_nsg.id
-
-}
 
 # Create Virtual Machines
 resource "azurerm_virtual_machine" "weight_tracker" {
